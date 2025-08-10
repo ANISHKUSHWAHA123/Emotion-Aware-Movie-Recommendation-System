@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Emotion-Based Movie Recommendation System</title>
+    <style>
+      #eye-gaze-container {
+        text-align: center;
+        margin: 20px 0;
+      }
+
+      #start-eye-gaze {
+        background-color: #007bff;
+        color: white;
+        padding: 10px 20px;
+        font-size: 16px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+      }
+
+      #start-eye-gaze:hover {
+        background-color: #0056b3;
+      }
+
+      .movie-container {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        margin-top: 20px;
+      }
+
+      .movie-card {
+        flex: 1 1 22%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 15px;
+        background-color: #f9f9f9;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 10px;
+        text-align: center;
+      }
+
+      .movie-card img {
+        width: 100%;
+        max-width: 250px;
+        height: auto;
+        border-radius: 5px;
+        cursor: pointer;
+        margin-bottom: 10px;
+      }
+
+      .movie-card h3 {
+        font-size: 18px;
+        margin: 10px 0 5px;
+      }
+
+      .movie-card p {
+        font-size: 14px;
+        color: #555;
+      }
+
+      .movie-card a {
+        text-decoration: none;
+        color: #007bff;
+        font-weight: bold;
+      }
+
+      .movie-card a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Welcome to Emotion-Based Movie Recommendation System</h1>
+    <button onclick="capture()">Get Recommendations</button>
+    <div id="output"></div>
+
+    <script>
+      let gazeSocket;
+
+      // Initialize WebSocket connection for real-time gaze tracking
+      function startEyeGaze() {
+        gazeSocket = new WebSocket("ws://localhost:8000/gaze");
+
+        gazeSocket.onmessage = function (event) {
+          const gazeData = JSON.parse(event.data);
+          const gazeX = gazeData.x;
+          const gazeY = gazeData.y;
+
+          // Highlight the movie poster based on gaze coordinates
+          highlightPoster(gazeX, gazeY);
+        };
+
+        gazeSocket.onopen = function () {
+          alert("Eye-gaze control started!");
+        };
+
+        gazeSocket.onerror = function () {
+          alert("Failed to connect to eye-gaze control backend.");
+        };
+      }
+
+      // Highlight the poster that corresponds to gaze coordinates
+      function highlightPoster(gazeX, gazeY) {
+        const posters = document.querySelectorAll(".movie-card img");
+
+        posters.forEach((poster, index) => {
+          const rect = poster.getBoundingClientRect();
+
+          // Check if the gaze coordinates fall within the poster's bounding box
+          if (
+            gazeX >= rect.left &&
+            gazeX <= rect.right &&
+            gazeY >= rect.top &&
+            gazeY <= rect.bottom
+          ) {
+            poster.style.border = "3px solid #007bff"; // Highlight effect
+          } else {
+            poster.style.border = "none"; // Remove highlight
+          }
+        });
+      }
+
+      // Stop eye-gaze tracking when the user navigates away
+      window.onbeforeunload = function () {
+        if (gazeSocket) {
+          gazeSocket.close();
+        }
+      };
+
+      const TMDB_API_KEY = "86e015e9ab57897be2dcac577f18400a";
+      const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+
+      async function fetchMovieDetails(movieName) {
+        const searchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(
+          movieName
+        )}`;
+        const searchResponse = await fetch(searchUrl);
+        const searchData = await searchResponse.json();
+
+        if (!searchData.results || searchData.results.length === 0) {
+          return { error: "Movie not found", name: movieName };
+        }
+
+        const movieId = searchData.results[0].id;
+        const detailsUrl = `${TMDB_BASE_URL}/movie/${movieId}?api_key=${TMDB_API_KEY}`;
+        const videosUrl = `${TMDB_BASE_URL}/movie/${movieId}/videos?api_key=${TMDB_API_KEY}`;
+
+        const [detailsResponse, videosResponse] = await Promise.all([
+          fetch(detailsUrl),
+          fetch(videosUrl),
+        ]);
+
+        const detailsData = await detailsResponse.json();
+        const videosData = await videosResponse.json();
+
+        const posterPath = detailsData.poster_path
+          ? `https://image.tmdb.org/t/p/w500${detailsData.poster_path}`
+          : null;
+        const trailer = videosData.results.find(
+          (video) => video.type === "Trailer"
+        );
+        const trailerUrl = trailer
+          ? `https://www.youtube.com/watch?v=${trailer.key}`
+          : null;
+
+        return {
+          name: detailsData.title,
+          genres: detailsData.genres.map((genre) => genre.name),
+          posterUrl: posterPath,
+          trailerUrl: trailerUrl,
+        };
+      }
+
+      async function capture() {
+        const response = await fetch("/process", { method: "POST" });
+        const data = await response.json();
+
+        if (data.error) {
+          document.getElementById("output").innerHTML = "Error: " + data.error;
+        } else if (data.status === "new_user") {
+          // Handle new user
+          alert("New user detected. Please enter your details.");
+        } else {
+          // Filter out duplicate movie titles
+          const uniqueRecommendations = [
+            ...new Map(
+              data.recommendations.map((movie) => [movie.title, movie])
+            ).values(),
+          ];
+
+          const movieDetails = await Promise.all(
+            uniqueRecommendations.map((movie) => fetchMovieDetails(movie.title))
+          );
+
+          const movieCards = movieDetails
+            .map((movie) =>
+              movie.error
+                ? `<div class="movie-card">
+               <p>Error fetching details for ${movie.name}</p>
+             </div>`
+                : `<div class="movie-card">
+               <a href="${movie.trailerUrl}" target="_blank">
+                 <img src="${movie.posterUrl}" alt="${movie.name} Poster" />
+               </a>
+               <h3>${movie.name}</h3>
+               <p>Genres: ${movie.genres.join(", ")}</p>
+               ${
+                 movie.trailerUrl
+                   ? `<a href="${movie.trailerUrl}" target="_blank">Watch Trailer</a>`
+                   : `<p>No Trailer Available</p>`
+               }
+             </div>`
+            )
+            .join("");
+
+          document.getElementById("output").innerHTML = `
+      <h3>Emotion Detected: ${data.emotion}</h3>
+      <h3>User: ${data.user}</h3>
+      <div id="eye-gaze-container" style="display: none;">
+      <button id="start-eye-gaze" onclick="startEyeGaze()">Start Eye Gaze</button>
+      </div>
+      <div class="movie-container">${movieCards}</div>
+    `;
+          document.getElementById("eye-gaze-container").style.display = "block";
+        }
+      }
+      async function startEyeGaze() {
+        const response = await fetch("/start-gaze", { method: "POST" });
+        const data = await response.json();
+
+        if (data.status) {
+          alert(data.status);
+        } else {
+          alert("Failed to start eye gaze control");
+        }
+      }
+      function getPosterRegions() {
+        const posters = document.querySelectorAll(".movie-card img");
+        return Array.from(posters).map((poster, index) => {
+          const rect = poster.getBoundingClientRect();
+          return {
+            id: index,
+            top_left: { x: rect.left, y: rect.top },
+            bottom_right: { x: rect.right, y: rect.bottom },
+          };
+        });
+      }
+
+      async function sendPosterRegions() {
+        const regions = getPosterRegions();
+        const response = await fetch("/poster-regions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ regions }),
+        });
+
+        const data = await response.json();
+        if (data.status === "success") {
+          console.log("Poster regions sent successfully!");
+        } else {
+          console.error("Failed to send poster regions.");
+        }
+      }
+
+      // Call this function when recommendations are displayed
+      async function displayRecommendations(movieDetails) {
+        const movieCards = movieDetails
+          .map((movie) =>
+            movie.error
+              ? `<div class="movie-card">
+           <p>Error fetching details for ${movie.name}</p>
+         </div>`
+              : `<div class="movie-card">
+           <a href="${movie.trailerUrl}" target="_blank">
+             <img src="${movie.posterUrl}" alt="${movie.name} Poster" />
+           </a>
+           <h3>${movie.name}</h3>
+           <p>Genres: ${movie.genres.join(", ")}</p>
+           ${
+             movie.trailerUrl
+               ? `<a href="${movie.trailerUrl}" target="_blank">Watch Trailer</a>`
+               : `<p>No Trailer Available</p>`
+           }
+         </div>`
+          )
+          .join("");
+
+        document.getElementById("output").innerHTML = `
+    <h3>Emotion Detected: ${data.emotion}</h3>
+    <h3>User: ${data.user}</h3>
+    <div id="eye-gaze-container" style="display: none;">
+      <button id="start-eye-gaze" onclick="startEyeGaze()">Start Eye Gaze</button>
+    </div>
+    <div class="movie-container">${movieCards}</div>
+  `;
+        document.getElementById("eye-gaze-container").style.display = "block";
+
+        // Send poster regions to the backend
+        await sendPosterRegions();
+      }
+    </script>
+  </body>
+</html>

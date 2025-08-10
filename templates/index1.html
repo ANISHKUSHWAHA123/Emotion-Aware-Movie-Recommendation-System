@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Emotion Based Movie Recommendation System</title>
+    <style>
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0, 0, 0, 0.4);
+      }
+
+      .modal-content {
+        background-color: #fff;
+        margin: 15% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+      }
+
+      .close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+      }
+
+      .close:hover,
+      .close:focus {
+        color: black;
+        text-decoration: none;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Welcome to Emotion Based Movie Recommendation System</h1>
+    <button onclick="capture()">Get Recommendations</button>
+    <div id="output"></div>
+
+    <!-- Modal for new user input -->
+    <div id="newUserModal" class="modal">
+      <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h2>New User Detected!</h2>
+        <form id="newUserForm">
+          <label for="userName">Enter Your Name:</label>
+          <input type="text" id="userName" name="userName" required />
+          <button type="submit">Submit</button>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      function capture() {
+        fetch("/process", { method: "POST" })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.error) {
+              document.getElementById("output").innerHTML =
+                "Error: " + data.error;
+            } else if (data.status === "new_user") {
+              // Show the modal for new user input
+              document.getElementById("newUserModal").style.display = "block";
+            } else {
+              let recommendations = data.recommendations
+                .map(
+                  (movie) =>
+                    `<li>${movie.title} (${movie.genre}) - <a href="${movie.video_url}" target="_blank">Watch</a></li>`
+                )
+                .join("");
+
+              document.getElementById("output").innerHTML = `
+                <h3>Emotion Detected: ${data.emotion}</h3>
+                <h3>User: ${data.user}</h3>
+                <ul>${recommendations}</ul>
+              `;
+            }
+          });
+      }
+
+      // Handle modal close
+      function closeModal() {
+        document.getElementById("newUserModal").style.display = "none";
+      }
+
+      // Handle new user form submission
+      document
+        .getElementById("newUserForm")
+        .addEventListener("submit", function (e) {
+          e.preventDefault();
+          const userName = document.getElementById("userName").value;
+
+          fetch("/new-user", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: userName }),
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              document.getElementById("output").innerHTML = `
+              <h3>Welcome, ${data.name}!</h3>
+              <p>Your preferences have been saved. Please capture again to get recommendations.</p>
+            `;
+              closeModal();
+            })
+            .catch((error) => {
+              console.error("Error:", error);
+              alert("An error occurred while saving your name.");
+            });
+        });
+    </script>
+  </body>
+</html>
